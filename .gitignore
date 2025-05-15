@@ -1,0 +1,24 @@
+# Fantom build artifacts
+/lib/
+/temp/
+*.pod
+
+# IDE and editor files
+.DS_Store
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+
+# System files
+Thumbs.db
+Desktop.ini
+
+# Log files
+*.log
+
+# Temporary files
+*~
+*.bak
+*.swp
