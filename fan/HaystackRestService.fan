@@ -12,6 +12,11 @@ using concurrent
 **
 const class HaystackRestService : WebMod
 {
+  ** Active watch subscriptions
+  private const ConcurrentMap watches := ConcurrentMap()
+  
+  ** Watch poll timeout in milliseconds
+  private const Duration watchTimeout := 1min
   new make()
   {
     this.context = HxContext.cur
@@ -144,36 +149,303 @@ const class HaystackRestService : WebMod
   ** Navigate record hierarchy
   private Void onNav()
   {
-    // TODO: Implement navigation
-    sendGrid([,])
+    // Check content type
+    if (req.method != "POST")
+    {
+      res.statusCode = 405
+      onErr("Method not allowed")
+      return
+    }
+
+    try
+    {
+      // Parse request
+      grid := readZincGrid
+      if (grid == null) return
+
+      // Get navId from request
+      navId := grid.first?.get("navId") as Str
+      if (navId == null)
+      {
+        // Return root nav nodes
+        results := [
+          Etc.makeDict([
+            "id": "points",
+            "dis": "Points",
+            "icon": "point",
+            "hasChildren": true
+          ]),
+          Etc.makeDict([
+            "id": "equips",
+            "dis": "Equipment",
+            "icon": "equip",
+            "hasChildren": true
+          ])
+        ]
+        sendGrid(results)
+        return
+      }
+
+      // Handle specific navigation paths
+      switch (navId)
+      {
+        case "points":
+          filter := HaystackFilter.parse("point")
+          results := folio.readAll(filter)
+          sendGrid(results)
+          
+        case "equips":
+          filter := HaystackFilter.parse("equip")
+          results := folio.readAll(filter)
+          sendGrid(results)
+          
+        default:
+          // Try to read specific item
+          try
+          {
+            ref := Ref(navId)
+            dict := folio.read(ref)
+            sendGrid([dict])
+          }
+          catch (Err e)
+          {
+            onErr("Invalid navId: ${navId}")
+          }
+      }
+    }
+    catch (Err e)
+    {
+      log.err("Nav error", e)
+      onErr("Navigation failed: ${e.msg}")
+    }
   }
 
   ** Subscribe to watch
   private Void onWatchSub()
   {
-    // TODO: Implement watch subscription
-    sendGrid([,])
+    if (req.method != "POST")
+    {
+      res.statusCode = 405
+      onErr("Method not allowed")
+      return
+    }
+
+    try
+    {
+      // Parse request
+      grid := readZincGrid
+      if (grid == null) return
+
+      // Get watch parameters
+      watchId := grid.first?.get("watchId") as Str
+      if (watchId == null)
+      {
+        onErr("Missing watchId")
+        return
+      }
+
+      // Create watch if it doesn't exist
+      if (!watches.containsKey(watchId))
+      {
+        watch := Watch
+        {
+          it.id = watchId
+          it.lastPoll = DateTime.now
+          it.changes = Ref:Dict[:]
+        }
+        watches[watchId] = watch
+      }
+
+      // Add points to watch
+      ids := grid.first?.get("ids") as Ref[]
+      if (ids != null)
+      {
+        watch := watches[watchId] as Watch
+        ids.each |id|
+        {
+          if (!watch.changes.containsKey(id))
+          {
+            try
+            {
+              dict := folio.read(id)
+              watch.changes[id] = dict
+            }
+            catch (Err e)
+            {
+              log.err("Watch read error: ${id}", e)
+            }
+          }
+        }
+      }
+
+      // Return success
+      sendGrid([Etc.makeDict(["watchId": watchId])])
+    }
+    catch (Err e)
+    {
+      log.err("Watch sub error", e)
+      onErr("Watch subscription failed: ${e.msg}")
+    }
   }
 
   ** Unsubscribe from watch
   private Void onWatchUnsub()
   {
-    // TODO: Implement watch unsubscription
-    sendGrid([,])
+    if (req.method != "POST")
+    {
+      res.statusCode = 405
+      onErr("Method not allowed")
+      return
+    }
+
+    try
+    {
+      // Parse request
+      grid := readZincGrid
+      if (grid == null) return
+
+      // Get watch ID
+      watchId := grid.first?.get("watchId") as Str
+      if (watchId == null)
+      {
+        onErr("Missing watchId")
+        return
+      }
+
+      // Remove watch
+      watches.remove(watchId)
+
+      // Return success
+      sendGrid([Etc.makeDict(["watchId": watchId])])
+    }
+    catch (Err e)
+    {
+      log.err("Watch unsub error", e)
+      onErr("Watch unsubscription failed: ${e.msg}")
+    }
   }
 
   ** Poll watch for changes
   private Void onWatchPoll()
   {
-    // TODO: Implement watch polling
-    sendGrid([,])
+    if (req.method != "POST")
+    {
+      res.statusCode = 405
+      onErr("Method not allowed")
+      return
+    }
+
+    try
+    {
+      // Parse request
+      grid := readZincGrid
+      if (grid == null) return
+
+      // Get watch ID
+      watchId := grid.first?.get("watchId") as Str
+      if (watchId == null)
+      {
+        onErr("Missing watchId")
+        return
+      }
+
+      // Get watch
+      watch := watches[watchId] as Watch
+      if (watch == null)
+      {
+        onErr("Invalid watchId")
+        return
+      }
+
+      // Update watched points
+      changes := Dict[,]
+      watch.changes.each |dict, id|
+      {
+        try
+        {
+          newDict := folio.read(id)
+          if (dict != newDict)
+          {
+            changes.add(newDict)
+            watch.changes[id] = newDict
+          }
+        }
+        catch (Err e)
+        {
+          log.err("Watch poll read error: ${id}", e)
+        }
+      }
+
+      // Update last poll time
+      watch.lastPoll = DateTime.now
+
+      // Return changes
+      sendGrid(changes)
+    }
+    catch (Err e)
+    {
+      log.err("Watch poll error", e)
+      onErr("Watch poll failed: ${e.msg}")
+    }
   }
 
   ** Write to point
   private Void onPointWrite()
   {
-    // TODO: Implement point write
-    sendGrid([,])
+    if (req.method != "POST")
+    {
+      res.statusCode = 405
+      onErr("Method not allowed")
+      return
+    }
+
+    try
+    {
+      // Parse request
+      grid := readZincGrid
+      if (grid == null) return
+
+      // Get point ID and value
+      dict := grid.first
+      if (dict == null)
+      {
+        onErr("Missing write data")
+        return
+      }
+
+      id := dict.get("id") as Ref
+      if (id == null)
+      {
+        onErr("Missing point id")
+        return
+      }
+
+      val := dict.get("val")
+      if (val == null)
+      {
+        onErr("Missing write value")
+        return
+      }
+
+      // Write to point
+      point := folio.read(id)
+      if (!point.has("writable"))
+      {
+        onErr("Point not writable")
+        return
+      }
+
+      // Perform write operation
+      folio.commit(Diff.makeAdd(id, ["curVal":val, "writeVal":val]))
+
+      // Return updated point
+      sendGrid([folio.read(id)])
+    }
+    catch (Err e)
+    {
+      log.err("Point write error", e)
+      onErr("Point write failed: ${e.msg}")
+    }
   }
 
   ** Send error response
@@ -227,6 +499,14 @@ const class HaystackRestService : WebMod
       onErr("Invalid ZINC format: ${e.msg}")
       return null
     }
+  }
+
+  ** Watch class for tracking subscriptions
+  private const class Watch
+  {
+    const Str id
+    DateTime lastPoll
+    const Ref:Dict changes
   }
 
   private const HxContext context
